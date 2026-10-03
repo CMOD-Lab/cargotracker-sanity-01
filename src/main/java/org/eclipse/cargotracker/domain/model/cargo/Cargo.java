@@ -168,12 +168,11 @@ public class Cargo implements Serializable {
     if (this == object) {
       return true;
     }
-    if (object == null || !(object instanceof Cargo)) {
-      return false;
+    // Java 17 pattern matching for instanceof
+    if (object instanceof Cargo other) {
+      return sameIdentityAs(other);
     }
-
-    Cargo other = (Cargo) object;
-    return sameIdentityAs(other);
+    return false;
   }
 
   private boolean sameIdentityAs(Cargo other) {
