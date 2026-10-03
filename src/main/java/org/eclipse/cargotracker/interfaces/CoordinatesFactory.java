@@ -15,23 +15,106 @@ import static org.eclipse.cargotracker.domain.model.location.SampleLocations.SHA
 import static org.eclipse.cargotracker.domain.model.location.SampleLocations.STOCKHOLM;
 import static org.eclipse.cargotracker.domain.model.location.SampleLocations.TOKYO;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.sync.RedisCommands;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.eclipse.cargotracker.domain.model.location.Location;
 import org.eclipse.cargotracker.domain.model.location.UnLocode;
 
 /**
  * At the moment, coordinates are produced by a simple factory. It may be converted to a repository
  * if coordinates become a domain layer concern.
+ *
+ * <p>Coordinates are cached in Amazon ElastiCache (Redis) to support horizontal scaling on EKS.
+ * Connection details are injected via environment variables:
+ * <ul>
+ *   <li>{@code REDIS_HOST} – ElastiCache primary endpoint (default: {@code localhost})</li>
+ *   <li>{@code REDIS_PORT} – ElastiCache port (default: {@code 6379})</li>
+ * </ul>
  */
 public class CoordinatesFactory {
 
-  private static final Map<String, Coordinates> COORDINATES_MAP;
+  private static final Logger LOGGER = Logger.getLogger(CoordinatesFactory.class.getName());
+
+  /** Redis key prefix used for all coordinates entries. */
+  private static final String REDIS_KEY_PREFIX = "coordinates:";
+
+  /** Lazily-initialised Redis client backed by Amazon ElastiCache. */
+  private static volatile RedisClient redisClient;
+  private static volatile StatefulRedisConnection<String, String> redisConnection;
 
   private CoordinatesFactory() {
     /* Prevent instantiation. */
   }
+
+  // ---------------------------------------------------------------------------
+  // Redis initialisation
+  // ---------------------------------------------------------------------------
+
+  private static RedisCommands<String, String> getRedisCommands() {
+    if (redisConnection == null || !redisConnection.isOpen()) {
+      synchronized (CoordinatesFactory.class) {
+        if (redisConnection == null || !redisConnection.isOpen()) {
+          String redisHost = System.getenv("REDIS_HOST") != null
+              ? System.getenv("REDIS_HOST") : "localhost";
+          int redisPort = 6379;
+          String redisPortEnv = System.getenv("REDIS_PORT");
+          if (redisPortEnv != null && !redisPortEnv.isEmpty()) {
+            try {
+              redisPort = Integer.parseInt(redisPortEnv);
+            } catch (NumberFormatException e) {
+              LOGGER.log(Level.WARNING, "Invalid REDIS_PORT value, using default 6379", e);
+            }
+          }
+          RedisURI redisUri = RedisURI.builder()
+              .withHost(redisHost)
+              .withPort(redisPort)
+              .build();
+          redisClient = RedisClient.create(redisUri);
+          redisConnection = redisClient.connect();
+          // Seed the cache with known coordinates on first connection
+          seedCoordinates(redisConnection.sync());
+        }
+      }
+    }
+    return redisConnection.sync();
+  }
+
+  /**
+   * Seeds the Redis cache with the known location coordinates.
+   * Uses SET NX (set-if-not-exists) so existing values are not overwritten.
+   */
+  private static void seedCoordinates(RedisCommands<String, String> commands) {
+    // TODO [Clean Code] See if there is a service to get the latitude/longitude data from.
+    seedIfAbsent(commands, HONGKONG.getUnLocode().getIdString(), 22, 114);
+    seedIfAbsent(commands, MELBOURNE.getUnLocode().getIdString(), -38, 145);
+    seedIfAbsent(commands, STOCKHOLM.getUnLocode().getIdString(), 59, 18);
+    seedIfAbsent(commands, HELSINKI.getUnLocode().getIdString(), 60, 25);
+    seedIfAbsent(commands, CHICAGO.getUnLocode().getIdString(), 42, -88);
+    seedIfAbsent(commands, TOKYO.getUnLocode().getIdString(), 36, 140);
+    seedIfAbsent(commands, HAMBURG.getUnLocode().getIdString(), 54, 10);
+    seedIfAbsent(commands, SHANGHAI.getUnLocode().getIdString(), 31, 121);
+    seedIfAbsent(commands, ROTTERDAM.getUnLocode().getIdString(), 52, 5);
+    seedIfAbsent(commands, GOTHENBURG.getUnLocode().getIdString(), 58, 12);
+    seedIfAbsent(commands, HANGZOU.getUnLocode().getIdString(), 30, 120);
+    seedIfAbsent(commands, NEWYORK.getUnLocode().getIdString(), 41, -74);
+    seedIfAbsent(commands, DALLAS.getUnLocode().getIdString(), 33, -97);
+    seedIfAbsent(commands, UNKNOWN.getUnLocode().getIdString(), -90, 0); // The South Pole.
+  }
+
+  private static void seedIfAbsent(RedisCommands<String, String> commands,
+      String unLocode, double lat, double lon) {
+    String key = REDIS_KEY_PREFIX + unLocode;
+    // Store as "lat:lon" string; use SETNX to avoid overwriting externally-managed values
+    commands.setnx(key, lat + ":" + lon);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public API
+  // ---------------------------------------------------------------------------
 
   public static Coordinates find(Location location) {
     return find(location.getUnLocode());
@@ -41,29 +124,30 @@ public class CoordinatesFactory {
     return find(unLocode.getIdString());
   }
 
+  /**
+   * Looks up coordinates for the given UN/LOCODE from Amazon ElastiCache (Redis).
+   *
+   * @param unLocode the UN/LOCODE string identifier
+   * @return the {@link Coordinates} for the location, or {@code null} if not found
+   */
   public static Coordinates find(String unLocode) {
-    return COORDINATES_MAP.get(unLocode);
-  }
-
-  static {
-    Map<String, Coordinates> map = new HashMap<>();
-
-    // TODO [Clean Code] See if there is a service to get the latitude/longitude data from.
-    map.put(HONGKONG.getUnLocode().getIdString(), new Coordinates(22, 114));
-    map.put(MELBOURNE.getUnLocode().getIdString(), new Coordinates(-38, 145));
-    map.put(STOCKHOLM.getUnLocode().getIdString(), new Coordinates(59, 18));
-    map.put(HELSINKI.getUnLocode().getIdString(), new Coordinates(60, 25));
-    map.put(CHICAGO.getUnLocode().getIdString(), new Coordinates(42, -88));
-    map.put(TOKYO.getUnLocode().getIdString(), new Coordinates(36, 140));
-    map.put(HAMBURG.getUnLocode().getIdString(), new Coordinates(54, 10));
-    map.put(SHANGHAI.getUnLocode().getIdString(), new Coordinates(31, 121));
-    map.put(ROTTERDAM.getUnLocode().getIdString(), new Coordinates(52, 5));
-    map.put(GOTHENBURG.getUnLocode().getIdString(), new Coordinates(58, 12));
-    map.put(HANGZOU.getUnLocode().getIdString(), new Coordinates(30, 120));
-    map.put(NEWYORK.getUnLocode().getIdString(), new Coordinates(41, -74));
-    map.put(DALLAS.getUnLocode().getIdString(), new Coordinates(33, -97));
-    map.put(UNKNOWN.getUnLocode().getIdString(), new Coordinates(-90, 0)); // The South Pole.
-
-    COORDINATES_MAP = Collections.unmodifiableMap(map);
+    try {
+      RedisCommands<String, String> commands = getRedisCommands();
+      String value = commands.get(REDIS_KEY_PREFIX + unLocode);
+      if (value == null) {
+        return null;
+      }
+      String[] parts = value.split(":");
+      if (parts.length != 2) {
+        LOGGER.warning("Unexpected coordinates format in Redis for key: " + unLocode);
+        return null;
+      }
+      double lat = Double.parseDouble(parts[0]);
+      double lon = Double.parseDouble(parts[1]);
+      return new Coordinates(lat, lon);
+    } catch (Exception e) {
+      LOGGER.log(Level.SEVERE, "Failed to retrieve coordinates from Redis for: " + unLocode, e);
+      return null;
+    }
   }
 }

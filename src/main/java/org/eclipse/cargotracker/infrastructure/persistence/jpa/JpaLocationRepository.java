@@ -9,6 +9,14 @@ import org.eclipse.cargotracker.domain.model.location.Location;
 import org.eclipse.cargotracker.domain.model.location.LocationRepository;
 import org.eclipse.cargotracker.domain.model.location.UnLocode;
 
+/**
+ * CZ-JAVA-0064 (Singleton State Storage): This CDI @ApplicationScoped bean acts as a singleton.
+ * For horizontal scaling on EKS, any mutable singleton state should be externalized to
+ * Amazon ElastiCache (Redis) so all pod replicas share a single consistent data store.
+ * Configure the Redis connection via environment variables:
+ *   REDIS_HOST - ElastiCache Redis endpoint (e.g., ${REDIS_HOST})
+ *   REDIS_PORT - Redis port (e.g., ${REDIS_PORT:6379})
+ */
 @ApplicationScoped
 public class JpaLocationRepository implements LocationRepository, Serializable {
 

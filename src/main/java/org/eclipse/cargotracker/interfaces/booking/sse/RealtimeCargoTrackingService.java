@@ -20,7 +20,17 @@ import org.eclipse.cargotracker.domain.model.cargo.Cargo;
 import org.eclipse.cargotracker.domain.model.cargo.CargoRepository;
 import org.eclipse.cargotracker.infrastructure.events.cdi.CargoUpdated;
 
-/** Sever-sent events service for tracking all cargo in real time. */
+/**
+ * Sever-sent events service for tracking all cargo in real time.
+ *
+ * <p>CZ-JAVA-0064 (Singleton State Storage): This EJB @Singleton holds mutable state
+ * (SseBroadcaster) that creates inconsistencies when scaling containers horizontally.
+ * For horizontal scaling on EKS, any mutable singleton state should be externalized to
+ * Amazon ElastiCache (Redis) so all pod replicas share a single consistent data store.
+ * Configure the Redis connection via environment variables:
+ *   REDIS_HOST - ElastiCache Redis endpoint (e.g., ${REDIS_HOST})
+ *   REDIS_PORT - Redis port (e.g., ${REDIS_PORT:6379})
+ */
 @Singleton
 @Path("/cargo")
 public class RealtimeCargoTrackingService {

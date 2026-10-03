@@ -1,0 +1,63 @@
+# Java / Maven build artifacts
+target/
+*.war
+*.jar
+!payara-micro*.jar
+
+# Maven wrapper (use system mvn only)
+mvnw
+mvnw.cmd
+.mvn/
+
+# Gradle wrapper (not used, but exclude for safety)
+gradlew
+gradlew.bat
+gradle/wrapper/
+
+# Version control
+.git/
+.gitignore
+.github/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+LICENSE.md
+CONTRIBUTING.md
+DEPENDENCIES
+
+# Test files
+src/test/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Node modules (if any)
+node_modules/
+
+# Build output
+build/
+out/
+
+# Docker files (avoid recursive context issues)
+docker-compose*.yml
+.dockerignore
