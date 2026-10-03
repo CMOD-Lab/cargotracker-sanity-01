@@ -32,6 +32,8 @@
     <payara.version>6.2025.3</payara.version>
     <payara.arquillian.adapter.version>3.1</payara.arquillian.adapter.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>    
+    <aws.sdk.version>2.25.60</aws.sdk.version>
+    <lettuce.version>6.3.2.RELEASE</lettuce.version>
   </properties>
   <dependencyManagement>
     <dependencies>
@@ -60,6 +62,29 @@
       <artifactId>jakarta.jakartaee-api</artifactId>
       <version>${jakartaee.api.version}</version>
       <scope>provided</scope>
+    </dependency>
+    <!-- AWS SDK v2 for S3 cloud-native storage -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>sqs</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <!-- AWS SDK v2 for S3 cloud-native storage -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>url-connection-client</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <!-- Lettuce Redis client for Amazon ElastiCache (cr-java-0066: static mutable state) -->
+    <dependency>
+      <groupId>io.lettuce</groupId>
+      <artifactId>lettuce-core</artifactId>
+      <version>${lettuce.version}</version>
     </dependency>
     <!-- The third-party dependencies this application has -->
     <dependency>

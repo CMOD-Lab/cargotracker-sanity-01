@@ -1,11 +1,12 @@
 package org.eclipse.cargotracker.interfaces.handling.file;
 
-import java.io.File;
-import java.io.RandomAccessFile;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jakarta.batch.api.chunk.AbstractItemReader;
@@ -19,71 +20,116 @@ import org.eclipse.cargotracker.domain.model.handling.HandlingEvent;
 import org.eclipse.cargotracker.domain.model.location.UnLocode;
 import org.eclipse.cargotracker.domain.model.voyage.VoyageNumber;
 import org.eclipse.cargotracker.interfaces.handling.HandlingEventRegistrationAttempt;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.S3Object;
 
 @Dependent
 @Named("EventItemReader")
 public class EventItemReader extends AbstractItemReader {
 
-  private static final String UPLOAD_DIRECTORY = "upload_directory";
+  private static final String UPLOAD_BUCKET = "upload_directory";
 
   @Inject private Logger logger;
 
   @Inject private JobContext jobContext;
   private EventFilesCheckpoint checkpoint;
-  private RandomAccessFile currentFile;
+  private BufferedReader currentReader;
+  private S3Client s3Client;
 
   @Override
   public void open(Serializable checkpoint) throws Exception {
-    File uploadDirectory = new File(jobContext.getProperties().getProperty(UPLOAD_DIRECTORY));
+    s3Client = S3Client.builder().build();
+    String uploadBucket = jobContext.getProperties().getProperty(UPLOAD_BUCKET);
 
     if (checkpoint == null) {
       this.checkpoint = new EventFilesCheckpoint();
-      logger.log(Level.INFO, "Scanning upload directory: {0}", uploadDirectory);
+      logger.log(Level.INFO, "Scanning upload bucket: {0}", uploadBucket);
 
-      if (!uploadDirectory.exists()) {
-        logger.log(Level.INFO, "Upload directory does not exist, creating it");
-        uploadDirectory.mkdirs();
+      ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+          .bucket(uploadBucket)
+          .build();
+      ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest);
+
+      if (listResponse.contents().isEmpty()) {
+        logger.log(Level.INFO, "Upload bucket is empty, no files to process");
       } else {
-        this.checkpoint.setFiles(Arrays.asList(uploadDirectory.listFiles()));
+        List<String> keys = new ArrayList<>();
+        for (S3Object s3Object : listResponse.contents()) {
+          keys.add(s3Object.key());
+        }
+        this.checkpoint.setFiles(keys);
       }
     } else {
       logger.log(Level.INFO, "Starting from previous checkpoint");
       this.checkpoint = (EventFilesCheckpoint) checkpoint;
     }
 
-    File file = this.checkpoint.currentFile();
+    String currentKey = this.checkpoint.currentFile();
 
-    if (file == null) {
+    if (currentKey == null) {
       logger.log(Level.INFO, "No files to process");
-      currentFile = null;
+      currentReader = null;
     } else {
-      currentFile = new RandomAccessFile(file, "r");
-      logger.log(Level.INFO, "Processing file: {0}", file);
-      currentFile.seek(this.checkpoint.getFilePointer());
+      openS3Object(uploadBucket, currentKey);
+      logger.log(Level.INFO, "Processing S3 object: {0}", currentKey);
+      skipToCheckpoint();
+    }
+  }
+
+  private void openS3Object(String bucket, String key) throws Exception {
+    GetObjectRequest getRequest = GetObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .build();
+    ResponseInputStream<GetObjectResponse> s3Stream = s3Client.getObject(getRequest);
+    currentReader = new BufferedReader(new InputStreamReader(s3Stream));
+  }
+
+  private void skipToCheckpoint() throws Exception {
+    long linesToSkip = this.checkpoint.getFilePointer();
+    for (long i = 0; i < linesToSkip; i++) {
+      if (currentReader.readLine() == null) {
+        break;
+      }
     }
   }
 
   @Override
   public Object readItem() throws Exception {
-    if (currentFile != null) {
-      String line = currentFile.readLine();
+    if (currentReader != null) {
+      String line = currentReader.readLine();
 
       if (line != null) {
-        this.checkpoint.setFilePointer(currentFile.getFilePointer());
+        this.checkpoint.incrementFilePointer();
         return parseLine(line);
       } else {
-        logger.log(
-            Level.INFO, "Finished processing file, deleting: {0}", this.checkpoint.currentFile());
-        currentFile.close();
-        this.checkpoint.currentFile().delete();
-        File nextFile = this.checkpoint.nextFile();
+        String currentKey = this.checkpoint.currentFile();
+        String uploadBucket = jobContext.getProperties().getProperty(UPLOAD_BUCKET);
+        logger.log(Level.INFO, "Finished processing S3 object, deleting: {0}", currentKey);
+        currentReader.close();
+        currentReader = null;
 
-        if (nextFile == null) {
+        // Delete the processed object from S3
+        DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
+            .bucket(uploadBucket)
+            .key(currentKey)
+            .build();
+        s3Client.deleteObject(deleteRequest);
+
+        String nextKey = this.checkpoint.nextFile();
+
+        if (nextKey == null) {
           logger.log(Level.INFO, "No more files to process");
           return null;
         } else {
-          currentFile = new RandomAccessFile(nextFile, "r");
-          logger.log(Level.INFO, "Processing file: {0}", nextFile);
+          openS3Object(uploadBucket, nextKey);
+          logger.log(Level.INFO, "Processing S3 object: {0}", nextKey);
           return readItem();
         }
       }

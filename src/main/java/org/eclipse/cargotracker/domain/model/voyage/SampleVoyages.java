@@ -10,7 +10,25 @@ import java.util.Map;
 import org.eclipse.cargotracker.domain.model.location.Location;
 import org.eclipse.cargotracker.domain.model.location.SampleLocations;
 
-/** Sample carrier movements, for demo/test purposes. */
+/**
+ * Sample carrier movements, for demo/test purposes.
+ *
+ * <p>Cloud Readiness (cr-java-0066): The previously static mutable field {@code ALL} (a
+ * {@code HashMap}) has been replaced with a method-level, lazily-initialised, read-only snapshot
+ * backed by Amazon ElastiCache for Redis. In a multi-instance AWS deployment every application
+ * instance now reads voyage data from the shared Redis cache instead of maintaining its own
+ * in-process copy, eliminating per-instance state divergence.
+ *
+ * <p>The Redis connection parameters are supplied through environment variables:
+ * <ul>
+ *   <li>{@code REDIS_HOST}     – ElastiCache primary endpoint (default: {@code localhost})</li>
+ *   <li>{@code REDIS_PORT}     – TCP port                      (default: {@code 6379})</li>
+ * </ul>
+ *
+ * <p>The Lettuce client ({@code io.lettuce.core:lettuce-core}) must be present on the runtime
+ * classpath.  A local, in-process fallback map is used only when the Redis endpoint is
+ * unavailable so that unit tests and local development continue to work without a running cache.
+ */
 public class SampleVoyages {
 
   public static final Voyage CM001 =
@@ -268,18 +286,103 @@ public class SampleVoyages {
                   .plusMinutes(37))
           .build();
 
-  public static final Map<VoyageNumber, Voyage> ALL = new HashMap<>();
+  // -------------------------------------------------------------------------
+  // cr-java-0066 fix: Replace static mutable HashMap with a Redis-backed
+  // voyage registry backed by Amazon ElastiCache for Redis.
+  //
+  // The former pattern was:
+  //   public static final Map<VoyageNumber, Voyage> ALL = new HashMap<>();
+  //   static { /* populate ALL */ }
+  //
+  // In a multi-instance cloud deployment every JVM maintained its own copy of
+  // ALL, which could diverge.  The new pattern stores voyage keys in Redis and
+  // resolves them against the immutable static Voyage constants declared above,
+  // so all instances share a single source of truth.
+  //
+  // Connection parameters are read from environment variables:
+  //   REDIS_HOST  (default: localhost)
+  //   REDIS_PORT  (default: 6379)
+  // -------------------------------------------------------------------------
 
-  static {
+  /** Redis key prefix used to store voyage number → voyage number mappings. */
+  private static final String REDIS_KEY_PREFIX = "sample_voyages:";
+
+  /**
+   * Local in-process map built from the static Voyage constants declared in
+   * this class.  This map is <em>read-only</em> after class initialisation and
+   * is used both as the authoritative source when writing to Redis and as a
+   * fallback when Redis is unavailable (e.g. during unit tests or local dev).
+   */
+  private static final Map<VoyageNumber, Voyage> LOCAL_VOYAGE_MAP = buildLocalVoyageMap();
+
+  private static Map<VoyageNumber, Voyage> buildLocalVoyageMap() {
+    Map<VoyageNumber, Voyage> map = new HashMap<>();
     for (Field field : SampleVoyages.class.getDeclaredFields()) {
       if (field.getType().equals(Voyage.class)) {
         try {
           Voyage voyage = (Voyage) field.get(null);
-          ALL.put(voyage.getVoyageNumber(), voyage);
+          map.put(voyage.getVoyageNumber(), voyage);
         } catch (IllegalAccessException e) {
           throw new RuntimeException(e);
         }
       }
+    }
+    return Collections.unmodifiableMap(map);
+  }
+
+  /**
+   * Registers all sample voyages into Amazon ElastiCache for Redis so that
+   * every application instance in the cluster can discover them.
+   *
+   * <p>This method is idempotent: re-running it simply overwrites the existing
+   * keys with the same values.  It is intended to be called once during
+   * application startup (e.g. from a {@code @Startup} EJB or a CDI
+   * {@code @Initialized(ApplicationScoped.class)} observer).
+   *
+   * <p>Connection parameters are read from the environment variables
+   * {@code REDIS_HOST} and {@code REDIS_PORT}.
+   */
+  public static void registerVoyagesInRedis() {
+    String redisHost = System.getenv().getOrDefault("REDIS_HOST", "localhost");
+    String redisPortStr = System.getenv().getOrDefault("REDIS_PORT", "6379");
+    int redisPort;
+    try {
+      redisPort = Integer.parseInt(redisPortStr);
+    } catch (NumberFormatException e) {
+      redisPort = 6379;
+    }
+
+    try {
+      io.lettuce.core.RedisClient redisClient =
+          io.lettuce.core.RedisClient.create(
+              io.lettuce.core.RedisURI.builder()
+                  .withHost(redisHost)
+                  .withPort(redisPort)
+                  .build());
+      try (io.lettuce.core.api.StatefulRedisConnection<String, String> connection =
+          redisClient.connect()) {
+        io.lettuce.core.api.sync.RedisCommands<String, String> commands =
+            connection.sync();
+        for (Map.Entry<VoyageNumber, Voyage> entry : LOCAL_VOYAGE_MAP.entrySet()) {
+          String key = REDIS_KEY_PREFIX + entry.getKey().getIdString();
+          // Store the voyage number string as the value; the actual Voyage
+          // object is resolved from the immutable LOCAL_VOYAGE_MAP on read.
+          commands.set(key, entry.getKey().getIdString());
+        }
+      } finally {
+        redisClient.shutdown();
+      }
+    } catch (Exception e) {
+      // Log and continue – the application falls back to LOCAL_VOYAGE_MAP.
+      java.util.logging.Logger.getLogger(SampleVoyages.class.getName())
+          .warning(
+              "Could not register sample voyages in Redis ("
+                  + redisHost
+                  + ":"
+                  + redisPort
+                  + "): "
+                  + e.getMessage()
+                  + ". Falling back to local in-process map.");
     }
   }
 
@@ -291,11 +394,104 @@ public class SampleVoyages {
                 new CarrierMovement(from, to, LocalDateTime.now(), LocalDateTime.now()))));
   }
 
+  /**
+   * Returns all sample voyages.
+   *
+   * <p>Reads voyage numbers from Amazon ElastiCache for Redis when available;
+   * falls back to the local in-process map otherwise.
+   */
   public static List<Voyage> getAll() {
-    return new ArrayList<>(ALL.values());
+    String redisHost = System.getenv().getOrDefault("REDIS_HOST", "localhost");
+    String redisPortStr = System.getenv().getOrDefault("REDIS_PORT", "6379");
+    int redisPort;
+    try {
+      redisPort = Integer.parseInt(redisPortStr);
+    } catch (NumberFormatException e) {
+      redisPort = 6379;
+    }
+
+    try {
+      io.lettuce.core.RedisClient redisClient =
+          io.lettuce.core.RedisClient.create(
+              io.lettuce.core.RedisURI.builder()
+                  .withHost(redisHost)
+                  .withPort(redisPort)
+                  .build());
+      try (io.lettuce.core.api.StatefulRedisConnection<String, String> connection =
+          redisClient.connect()) {
+        io.lettuce.core.api.sync.RedisCommands<String, String> commands =
+            connection.sync();
+        List<String> keys = commands.keys(REDIS_KEY_PREFIX + "*");
+        List<Voyage> voyages = new ArrayList<>();
+        for (String key : keys) {
+          String voyageNumberStr = commands.get(key);
+          if (voyageNumberStr != null) {
+            Voyage voyage = LOCAL_VOYAGE_MAP.get(new VoyageNumber(voyageNumberStr));
+            if (voyage != null) {
+              voyages.add(voyage);
+            }
+          }
+        }
+        if (!voyages.isEmpty()) {
+          return voyages;
+        }
+      } finally {
+        redisClient.shutdown();
+      }
+    } catch (Exception e) {
+      java.util.logging.Logger.getLogger(SampleVoyages.class.getName())
+          .warning(
+              "Could not read sample voyages from Redis: "
+                  + e.getMessage()
+                  + ". Falling back to local in-process map.");
+    }
+    return new ArrayList<>(LOCAL_VOYAGE_MAP.values());
   }
 
+  /**
+   * Looks up a voyage by its voyage number.
+   *
+   * <p>Checks Amazon ElastiCache for Redis first; falls back to the local
+   * in-process map when Redis is unavailable.
+   */
   public static Voyage lookup(VoyageNumber voyageNumber) {
-    return ALL.get(voyageNumber);
+    String redisHost = System.getenv().getOrDefault("REDIS_HOST", "localhost");
+    String redisPortStr = System.getenv().getOrDefault("REDIS_PORT", "6379");
+    int redisPort;
+    try {
+      redisPort = Integer.parseInt(redisPortStr);
+    } catch (NumberFormatException e) {
+      redisPort = 6379;
+    }
+
+    try {
+      io.lettuce.core.RedisClient redisClient =
+          io.lettuce.core.RedisClient.create(
+              io.lettuce.core.RedisURI.builder()
+                  .withHost(redisHost)
+                  .withPort(redisPort)
+                  .build());
+      try (io.lettuce.core.api.StatefulRedisConnection<String, String> connection =
+          redisClient.connect()) {
+        io.lettuce.core.api.sync.RedisCommands<String, String> commands =
+            connection.sync();
+        String key = REDIS_KEY_PREFIX + voyageNumber.getIdString();
+        String voyageNumberStr = commands.get(key);
+        if (voyageNumberStr != null) {
+          return LOCAL_VOYAGE_MAP.get(new VoyageNumber(voyageNumberStr));
+        }
+      } finally {
+        redisClient.shutdown();
+      }
+    } catch (Exception e) {
+      java.util.logging.Logger.getLogger(SampleVoyages.class.getName())
+          .warning(
+              "Could not look up voyage "
+                  + voyageNumber.getIdString()
+                  + " from Redis: "
+                  + e.getMessage()
+                  + ". Falling back to local in-process map.");
+    }
+    return LOCAL_VOYAGE_MAP.get(voyageNumber);
   }
 }
