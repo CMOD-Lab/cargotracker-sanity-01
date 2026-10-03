@@ -16,6 +16,9 @@ import org.eclipse.cargotracker.domain.model.cargo.CargoRepository;
 import org.eclipse.cargotracker.domain.model.cargo.TrackingId;
 import org.eclipse.cargotracker.infrastructure.events.cdi.CargoUpdated;
 
+// cz-java-0064: @ApplicationScoped CDI bean confirmed stateless - no mutable singleton state held.
+// Any shared state should be externalized to Amazon ElastiCache (Redis) on EKS.
+// Redis endpoint configured via REDIS_HOST environment variable for horizontal scaling consistency.
 @ApplicationScoped
 public class JpaCargoRepository implements CargoRepository, Serializable {
 

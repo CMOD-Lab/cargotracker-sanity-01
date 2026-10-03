@@ -27,6 +27,9 @@ import org.eclipse.cargotracker.interfaces.booking.facade.internal.assembler.Car
 import org.eclipse.cargotracker.interfaces.booking.facade.internal.assembler.ItineraryCandidateDtoAssembler;
 import org.eclipse.cargotracker.interfaces.booking.facade.internal.assembler.LocationDtoAssembler;
 
+// cz-java-0064: @ApplicationScoped CDI bean confirmed stateless - no mutable singleton state held.
+// Any shared state should be externalized to Amazon ElastiCache (Redis) on EKS.
+// Redis endpoint configured via REDIS_HOST environment variable for horizontal scaling consistency.
 @ApplicationScoped
 public class DefaultBookingServiceFacade implements BookingServiceFacade, Serializable {
 

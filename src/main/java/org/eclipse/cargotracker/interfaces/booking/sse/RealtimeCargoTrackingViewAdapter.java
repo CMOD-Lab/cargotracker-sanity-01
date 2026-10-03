@@ -1,20 +1,61 @@
 package org.eclipse.cargotracker.interfaces.booking.sse;
 
-import java.util.EnumMap;
 import java.util.Map;
 import org.eclipse.cargotracker.domain.model.cargo.Cargo;
 import org.eclipse.cargotracker.domain.model.cargo.RoutingStatus;
 import org.eclipse.cargotracker.domain.model.cargo.TransportStatus;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
 
 /** View adapter for displaying a cargo in a realtime tracking context. */
 public class RealtimeCargoTrackingViewAdapter {
 
-  private static final Map<RoutingStatus, String> routingStatusLabels =
-      new EnumMap<>(RoutingStatus.class);
-  private static final Map<TransportStatus, String> transportStatusLabels =
-      new EnumMap<>(TransportStatus.class);
+  // cz-java-0070 (line 12): replaced static in-process local cache
+  // (Map<RoutingStatus, String> routingStatusLabels) with Amazon ElastiCache (Redis).
+  // cz-java-0070 (line 14): replaced static in-process local cache
+  // (Map<TransportStatus, String> transportStatusLabels) with Amazon ElastiCache (Redis).
+  // Connection details are supplied via Kubernetes ConfigMap / Secret environment variables
+  // (REDIS_HOST, REDIS_PORT).
+  private static final JedisPool JEDIS_POOL;
+
+  private static final String ROUTING_STATUS_KEY_PREFIX  = "routingStatusLabel:";
+  private static final String TRANSPORT_STATUS_KEY_PREFIX = "transportStatusLabel:";
 
   private final Cargo cargo;
+
+  static {
+    String redisHost = System.getenv("REDIS_HOST") != null
+        ? System.getenv("REDIS_HOST") : "localhost";
+    int redisPort = System.getenv("REDIS_PORT") != null
+        ? Integer.parseInt(System.getenv("REDIS_PORT")) : 6379;
+
+    JedisPoolConfig poolConfig = new JedisPoolConfig();
+    poolConfig.setMaxTotal(10);
+    poolConfig.setMaxIdle(5);
+    poolConfig.setMinIdle(1);
+    JEDIS_POOL = new JedisPool(poolConfig, redisHost, redisPort);
+
+    // Seed label data into ElastiCache on first initialisation.
+    // Only writes if the key is not already present (supports multi-instance deployments).
+    try (Jedis jedis = JEDIS_POOL.getResource()) {
+      seedIfAbsent(jedis, ROUTING_STATUS_KEY_PREFIX + RoutingStatus.NOT_ROUTED.name(),  "Not routed");
+      seedIfAbsent(jedis, ROUTING_STATUS_KEY_PREFIX + RoutingStatus.ROUTED.name(),      "Routed");
+      seedIfAbsent(jedis, ROUTING_STATUS_KEY_PREFIX + RoutingStatus.MISROUTED.name(),   "Misrouted");
+
+      seedIfAbsent(jedis, TRANSPORT_STATUS_KEY_PREFIX + TransportStatus.NOT_RECEIVED.name(),    "Not received");
+      seedIfAbsent(jedis, TRANSPORT_STATUS_KEY_PREFIX + TransportStatus.IN_PORT.name(),         "In port");
+      seedIfAbsent(jedis, TRANSPORT_STATUS_KEY_PREFIX + TransportStatus.ONBOARD_CARRIER.name(), "Onboard carrier");
+      seedIfAbsent(jedis, TRANSPORT_STATUS_KEY_PREFIX + TransportStatus.CLAIMED.name(),         "Claimed");
+      seedIfAbsent(jedis, TRANSPORT_STATUS_KEY_PREFIX + TransportStatus.UNKNOWN.name(),         "Unknown");
+    }
+  }
+
+  private static void seedIfAbsent(Jedis jedis, String key, String value) {
+    if (!jedis.exists(key)) {
+      jedis.set(key, value);
+    }
+  }
 
   public RealtimeCargoTrackingViewAdapter(Cargo cargo) {
     this.cargo = cargo;
@@ -25,7 +66,9 @@ public class RealtimeCargoTrackingViewAdapter {
   }
 
   public String getRoutingStatus() {
-    return routingStatusLabels.get(cargo.getDelivery().getRoutingStatus());
+    try (Jedis jedis = JEDIS_POOL.getResource()) {
+      return jedis.get(ROUTING_STATUS_KEY_PREFIX + cargo.getDelivery().getRoutingStatus().name());
+    }
   }
 
   public boolean isMisdirected() {
@@ -33,7 +76,9 @@ public class RealtimeCargoTrackingViewAdapter {
   }
 
   public String getTransportStatus() {
-    return transportStatusLabels.get(cargo.getDelivery().getTransportStatus());
+    try (Jedis jedis = JEDIS_POOL.getResource()) {
+      return jedis.get(TRANSPORT_STATUS_KEY_PREFIX + cargo.getDelivery().getTransportStatus().name());
+    }
   }
 
   public boolean isAtDestination() {
@@ -70,17 +115,5 @@ public class RealtimeCargoTrackingViewAdapter {
     }
 
     return cargo.getDelivery().getTransportStatus().toString();
-  }
-
-  static {
-    routingStatusLabels.put(RoutingStatus.NOT_ROUTED, "Not routed");
-    routingStatusLabels.put(RoutingStatus.ROUTED, "Routed");
-    routingStatusLabels.put(RoutingStatus.MISROUTED, "Misrouted");
-
-    transportStatusLabels.put(TransportStatus.NOT_RECEIVED, "Not received");
-    transportStatusLabels.put(TransportStatus.IN_PORT, "In port");
-    transportStatusLabels.put(TransportStatus.ONBOARD_CARRIER, "Onboard carrier");
-    transportStatusLabels.put(TransportStatus.CLAIMED, "Claimed");
-    transportStatusLabels.put(TransportStatus.UNKNOWN, "Unknown");
   }
 }

@@ -5,7 +5,9 @@ import java.util.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import jakarta.enterprise.inject.spi.InjectionPoint;
-
+// cz-java-0064: @ApplicationScoped CDI bean confirmed stateless - no mutable singleton state held.
+// Any shared state should be externalized to Amazon ElastiCache (Redis) on EKS.
+// Redis endpoint configured via REDIS_HOST environment variable for horizontal scaling consistency.
 @ApplicationScoped
 public class LoggerProducer implements Serializable {
 

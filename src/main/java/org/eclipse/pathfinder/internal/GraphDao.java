@@ -6,7 +6,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import jakarta.enterprise.context.ApplicationScoped;
-
+// cz-java-0064: @ApplicationScoped CDI bean - the Random instance is node-local state.
+// For consistent random seed state across horizontally scaled EKS pods, externalize
+// shared state to Amazon ElastiCache (Redis) on EKS.
+// Redis endpoint configured via REDIS_HOST environment variable.
 @ApplicationScoped
 public class GraphDao implements Serializable {
 

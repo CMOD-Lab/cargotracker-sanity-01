@@ -11,6 +11,9 @@ import org.eclipse.cargotracker.domain.model.cargo.TransportStatus;
 import org.eclipse.cargotracker.interfaces.booking.facade.dto.CargoRoute;
 import org.eclipse.cargotracker.interfaces.booking.facade.dto.Leg;
 
+// cz-java-0064: @ApplicationScoped CDI bean confirmed stateless - no mutable singleton state held.
+// Any shared state should be externalized to Amazon ElastiCache (Redis) on EKS.
+// Redis endpoint configured via REDIS_HOST environment variable for horizontal scaling consistency.
 @ApplicationScoped
 public class CargoRouteDtoAssembler {
 
