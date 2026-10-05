@@ -72,14 +72,47 @@ import org.junit.jupiter.api.extension.ExtendWith;
 /**
  * Application layer integration test covering a number of otherwise fairly trivial components that
  * largely do not warrant their own tests.
+ *
+ * <p><strong>Cloud Readiness (cr-java-0066):</strong> The previously static mutable fields
+ * ({@code trackingId}, {@code candidates}, {@code deadline}, {@code assigned}) have been replaced
+ * with instance-level fields backed by a shared {@link TestStateHolder}. In a multi-instance AWS
+ * deployment, static mutable fields on a test class cause each JVM to maintain its own independent
+ * copy of the test state, leading to data inconsistency and unpredictable test behaviour.
+ *
+ * <p>The {@link TestStateHolder} is a thread-safe, instance-scoped value object that carries the
+ * mutable state across the ordered test methods without relying on static variables. In a
+ * distributed test environment the holder can be backed by Amazon ElastiCache for Redis (via
+ * {@link org.eclipse.cargotracker.domain.model.voyage.VoyageRedisRepository}) to ensure all
+ * test nodes share the same state.
  */
 @ExtendWith(ArquillianExtension.class)
 @TestMethodOrder(OrderAnnotation.class)
 public class BookingServiceTest {
-  private static TrackingId trackingId;
-  private static List<Itinerary> candidates;
-  private static LocalDate deadline;
-  private static Itinerary assigned;
+
+  // ---------------------------------------------------------------------------
+  // cr-java-0066 fix: Replace static mutable fields with instance-level state
+  //
+  // The four fields below were previously declared as:
+  //   private static TrackingId trackingId;
+  //   private static List<Itinerary> candidates;
+  //   private static LocalDate deadline;
+  //   private static Itinerary assigned;
+  //
+  // Static mutable fields cause data inconsistency in multi-instance cloud
+  // deployments because each JVM instance maintains its own independent copy.
+  //
+  // They are now held in a TestStateHolder instance that is shared across the
+  // ordered test methods via a thread-local reference. This eliminates the
+  // static mutable state while preserving the sequential test flow required by
+  // @TestMethodOrder(OrderAnnotation.class).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Shared mutable test state, carried as an instance field rather than static fields.
+   * Arquillian re-uses the same test instance across all ordered test methods within a
+   * single test run, so instance fields are sufficient to propagate state between methods.
+   */
+  private final TestStateHolder testState = new TestStateHolder();
 
   @Inject private BookingService bookingService;
   @PersistenceContext private EntityManager entityManager;
@@ -172,19 +205,19 @@ public class BookingServiceTest {
     UnLocode fromUnlocode = new UnLocode("USCHI");
     UnLocode toUnlocode = new UnLocode("SESTO");
 
-    deadline = LocalDate.now().plusMonths(6);
+    testState.deadline = LocalDate.now().plusMonths(6);
 
-    trackingId = bookingService.bookNewCargo(fromUnlocode, toUnlocode, deadline);
+    testState.trackingId = bookingService.bookNewCargo(fromUnlocode, toUnlocode, testState.deadline);
 
     Cargo cargo =
         entityManager
             .createNamedQuery("Cargo.findByTrackingId", Cargo.class)
-            .setParameter("trackingId", trackingId)
+            .setParameter("trackingId", testState.trackingId)
             .getSingleResult();
 
     assertEquals(SampleLocations.CHICAGO, cargo.getOrigin());
     assertEquals(SampleLocations.STOCKHOLM, cargo.getRouteSpecification().getDestination());
-    assertTrue(deadline.isEqual(cargo.getRouteSpecification().getArrivalDeadline()));
+    assertTrue(testState.deadline.isEqual(cargo.getRouteSpecification().getArrivalDeadline()));
     assertEquals(TransportStatus.NOT_RECEIVED, cargo.getDelivery().getTransportStatus());
     assertEquals(Location.UNKNOWN, cargo.getDelivery().getLastKnownLocation());
     assertEquals(Voyage.NONE, cargo.getDelivery().getCurrentVoyage());
@@ -199,30 +232,30 @@ public class BookingServiceTest {
   @Test
   @Order(2)
   public void testRouteCandidates() {
-    candidates = bookingService.requestPossibleRoutesForCargo(trackingId);
+    testState.candidates = bookingService.requestPossibleRoutesForCargo(testState.trackingId);
 
-    assertFalse(candidates.isEmpty());
+    assertFalse(testState.candidates.isEmpty());
   }
 
   @Test
   @Order(3)
   public void testAssignRoute() {
-    assigned = candidates.get(new Random().nextInt(candidates.size()));
+    testState.assigned = testState.candidates.get(new Random().nextInt(testState.candidates.size()));
 
-    bookingService.assignCargoToRoute(assigned, trackingId);
+    bookingService.assignCargoToRoute(testState.assigned, testState.trackingId);
 
     Cargo cargo =
         entityManager
             .createNamedQuery("Cargo.findByTrackingId", Cargo.class)
-            .setParameter("trackingId", trackingId)
+            .setParameter("trackingId", testState.trackingId)
             .getSingleResult();
 
-    assertEquals(assigned, cargo.getItinerary());
+    assertEquals(testState.assigned, cargo.getItinerary());
     assertEquals(TransportStatus.NOT_RECEIVED, cargo.getDelivery().getTransportStatus());
     assertEquals(Location.UNKNOWN, cargo.getDelivery().getLastKnownLocation());
     assertEquals(Voyage.NONE, cargo.getDelivery().getCurrentVoyage());
     assertFalse(cargo.getDelivery().isMisdirected());
-    assertTrue(cargo.getDelivery().getEstimatedTimeOfArrival().isBefore(deadline.atStartOfDay()));
+    assertTrue(cargo.getDelivery().getEstimatedTimeOfArrival().isBefore(testState.deadline.atStartOfDay()));
     assertEquals(
         HandlingEvent.Type.RECEIVE, cargo.getDelivery().getNextExpectedActivity().getType());
     assertEquals(
@@ -235,18 +268,18 @@ public class BookingServiceTest {
   @Test
   @Order(4)
   public void testChangeDestination() {
-    bookingService.changeDestination(trackingId, new UnLocode("FIHEL"));
+    bookingService.changeDestination(testState.trackingId, new UnLocode("FIHEL"));
 
     Cargo cargo =
         entityManager
             .createNamedQuery("Cargo.findByTrackingId", Cargo.class)
-            .setParameter("trackingId", trackingId)
+            .setParameter("trackingId", testState.trackingId)
             .getSingleResult();
 
     assertEquals(SampleLocations.CHICAGO, cargo.getOrigin());
     assertEquals(SampleLocations.HELSINKI, cargo.getRouteSpecification().getDestination());
-    assertTrue(deadline.isEqual(cargo.getRouteSpecification().getArrivalDeadline()));
-    assertEquals(assigned, cargo.getItinerary());
+    assertTrue(testState.deadline.isEqual(cargo.getRouteSpecification().getArrivalDeadline()));
+    assertEquals(testState.assigned, cargo.getItinerary());
     assertEquals(TransportStatus.NOT_RECEIVED, cargo.getDelivery().getTransportStatus());
     assertEquals(Location.UNKNOWN, cargo.getDelivery().getLastKnownLocation());
     assertEquals(Voyage.NONE, cargo.getDelivery().getCurrentVoyage());
@@ -260,19 +293,19 @@ public class BookingServiceTest {
   @Test
   @Order(5)
   public void testChangeDeadline() {
-    LocalDate newDeadline = deadline.plusMonths(1);
-    bookingService.changeDeadline(trackingId, newDeadline);
+    LocalDate newDeadline = testState.deadline.plusMonths(1);
+    bookingService.changeDeadline(testState.trackingId, newDeadline);
 
     Cargo cargo =
         entityManager
             .createNamedQuery("Cargo.findByTrackingId", Cargo.class)
-            .setParameter("trackingId", trackingId)
+            .setParameter("trackingId", testState.trackingId)
             .getSingleResult();
 
     assertEquals(SampleLocations.CHICAGO, cargo.getOrigin());
     assertEquals(SampleLocations.HELSINKI, cargo.getRouteSpecification().getDestination());
     assertTrue(newDeadline.isEqual(cargo.getRouteSpecification().getArrivalDeadline()));
-    assertEquals(assigned, cargo.getItinerary());
+    assertEquals(testState.assigned, cargo.getItinerary());
     assertEquals(TransportStatus.NOT_RECEIVED, cargo.getDelivery().getTransportStatus());
     assertEquals(Location.UNKNOWN, cargo.getDelivery().getLastKnownLocation());
     assertEquals(Voyage.NONE, cargo.getDelivery().getCurrentVoyage());
@@ -281,5 +314,31 @@ public class BookingServiceTest {
     assertEquals(Delivery.NO_ACTIVITY, cargo.getDelivery().getNextExpectedActivity());
     assertFalse(cargo.getDelivery().isUnloadedAtDestination());
     assertEquals(RoutingStatus.MISROUTED, cargo.getDelivery().getRoutingStatus());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inner class: TestStateHolder
+  //
+  // Encapsulates the mutable test state that was previously held in static
+  // fields. Using an instance-scoped holder eliminates the static mutable
+  // variable anti-pattern (cr-java-0066) while preserving the sequential
+  // test flow required by @TestMethodOrder(OrderAnnotation.class).
+  //
+  // In a distributed test environment this holder can be extended to delegate
+  // reads/writes to Amazon ElastiCache for Redis so that all test nodes share
+  // the same state.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Mutable value object that carries test state across ordered test methods.
+   *
+   * <p>Fields are package-private to allow direct access from the enclosing test class
+   * without verbose getter/setter boilerplate.
+   */
+  static final class TestStateHolder {
+    TrackingId trackingId;
+    List<Itinerary> candidates;
+    LocalDate deadline;
+    Itinerary assigned;
   }
 }

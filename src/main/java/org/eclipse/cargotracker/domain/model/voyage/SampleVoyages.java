@@ -10,7 +10,19 @@ import java.util.Map;
 import org.eclipse.cargotracker.domain.model.location.Location;
 import org.eclipse.cargotracker.domain.model.location.SampleLocations;
 
-/** Sample carrier movements, for demo/test purposes. */
+/**
+ * Sample carrier movements, for demo/test purposes.
+ *
+ * <p>Cloud Readiness (cr-java-0066): The previously static mutable {@code ALL} map has been
+ * replaced with a Redis-backed store via {@link VoyageRedisRepository}. In a multi-instance AWS
+ * deployment each JVM instance previously held its own independent copy of the map, causing
+ * data inconsistency. All reads and writes now go through Amazon ElastiCache for Redis so that
+ * every application instance shares a single, consistent view of the voyage catalogue.
+ *
+ * <p>The static constant voyage objects (CM001 … HELSINKI_TO_HONGKONG) are intentionally kept as
+ * {@code static final} because they are <em>immutable</em> value objects whose identity never
+ * changes at runtime; only the mutable aggregation map has been migrated to Redis.
+ */
 public class SampleVoyages {
 
   public static final Voyage CM001 =
@@ -268,19 +280,42 @@ public class SampleVoyages {
                   .plusMinutes(37))
           .build();
 
-  public static final Map<VoyageNumber, Voyage> ALL = new HashMap<>();
+  // ---------------------------------------------------------------------------
+  // cr-java-0066 fix: Replace static mutable Map with Redis-backed repository
+  //
+  // The original code stored all voyages in a static mutable HashMap (ALL).
+  // In a multi-instance AWS deployment each JVM held its own independent copy,
+  // causing data inconsistency across instances.
+  //
+  // The mutable aggregation map is now managed exclusively through
+  // VoyageRedisRepository, which delegates reads/writes to Amazon ElastiCache
+  // for Redis so that every application instance shares a single, consistent
+  // view of the voyage catalogue.
+  //
+  // A local in-memory snapshot is still built once at class-load time and used
+  // as the seed for the Redis store (first-writer-wins semantics); subsequent
+  // lookups always go through Redis to guarantee cross-instance consistency.
+  // ---------------------------------------------------------------------------
+
+  /** Redis-backed repository used for all cross-instance voyage state. */
+  private static final VoyageRedisRepository redisRepository;
 
   static {
+    // Build the local seed map from all Voyage-typed fields declared in this class.
+    Map<VoyageNumber, Voyage> seed = new HashMap<>();
     for (Field field : SampleVoyages.class.getDeclaredFields()) {
       if (field.getType().equals(Voyage.class)) {
         try {
           Voyage voyage = (Voyage) field.get(null);
-          ALL.put(voyage.getVoyageNumber(), voyage);
+          seed.put(voyage.getVoyageNumber(), voyage);
         } catch (IllegalAccessException e) {
           throw new RuntimeException(e);
         }
       }
     }
+    // Initialise the Redis repository and seed it with the sample voyages.
+    redisRepository = new VoyageRedisRepository();
+    redisRepository.seedIfAbsent(seed);
   }
 
   private static Voyage createVoyage(String id, Location from, Location to) {
@@ -291,11 +326,21 @@ public class SampleVoyages {
                 new CarrierMovement(from, to, LocalDateTime.now(), LocalDateTime.now()))));
   }
 
+  /**
+   * Returns all sample voyages.
+   *
+   * <p>Reads from Amazon ElastiCache for Redis to ensure cross-instance consistency.
+   */
   public static List<Voyage> getAll() {
-    return new ArrayList<>(ALL.values());
+    return new ArrayList<>(redisRepository.findAll().values());
   }
 
+  /**
+   * Looks up a voyage by its voyage number.
+   *
+   * <p>Reads from Amazon ElastiCache for Redis to ensure cross-instance consistency.
+   */
   public static Voyage lookup(VoyageNumber voyageNumber) {
-    return ALL.get(voyageNumber);
+    return redisRepository.findByVoyageNumber(voyageNumber);
   }
 }

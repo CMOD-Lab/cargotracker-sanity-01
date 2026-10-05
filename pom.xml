@@ -32,6 +32,12 @@
     <payara.version>6.2025.3</payara.version>
     <payara.arquillian.adapter.version>3.1</payara.arquillian.adapter.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>    
+    <!-- AWS SDK v2 -->
+    <aws.sdk.version>2.25.40</aws.sdk.version>
+    <!-- AWS SDK v2 SQS client for cloud-native messaging (cr-java-0103) -->
+    <aws.sqs.version>2.25.40</aws.sqs.version>
+    <!-- Jedis Redis client for Amazon ElastiCache (cr-java-0066) -->
+    <jedis.version>5.1.0</jedis.version>
   </properties>
   <dependencyManagement>
     <dependencies>
@@ -60,6 +66,35 @@
       <artifactId>jakarta.jakartaee-api</artifactId>
       <version>${jakartaee.api.version}</version>
       <scope>provided</scope>
+    </dependency>
+    <!-- AWS SDK v2: S3 client for cloud-native file storage (replaces local file-system paths) -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>regions</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>auth</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <!-- AWS SDK v2: SQS client for cloud-native messaging (replaces JMS/MDB CargoHandledConsumer) -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>sqs</artifactId>
+      <version>${aws.sqs.version}</version>
+    </dependency>
+    <!-- Jedis: Redis client for Amazon ElastiCache for Redis (cr-java-0066)
+         Replaces static mutable Map state with distributed Redis-backed store. -->
+    <dependency>
+      <groupId>redis.clients</groupId>
+      <artifactId>jedis</artifactId>
+      <version>${jedis.version}</version>
     </dependency>
     <!-- The third-party dependencies this application has -->
     <dependency>
