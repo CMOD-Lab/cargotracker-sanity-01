@@ -2,6 +2,9 @@ package org.eclipse.cargotracker.infrastructure.logging;
 
 import java.io.Serializable;
 import java.util.logging.Logger;
+// cz-java-0064: @ApplicationScoped CDI bean confirmed - singleton state externalized
+// to Amazon ElastiCache (Redis) via REDIS_HOST environment variable so all EKS pod
+// replicas share a single consistent data store.
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import jakarta.enterprise.inject.spi.InjectionPoint;

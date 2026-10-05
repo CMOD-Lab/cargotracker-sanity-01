@@ -1,0 +1,57 @@
+# Java / Maven build artefacts
+target/
+*.class
+
+# Maven wrapper – never needed inside Docker (system mvn is used)
+mvnw
+mvnw.cmd
+.mvn/
+
+# Gradle wrapper (not used in this project, but excluded for safety)
+gradlew
+gradlew.bat
+gradle/wrapper/
+
+# Version control
+.git/
+.gitignore
+.github/
+
+# IDE / editor files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+
+# Documentation / markdown
+*.md
+LICENSE.md
+CONTRIBUTING.md
+DEPENDENCIES
+
+# Test resources
+src/test/
+
+# Existing Kubernetes / compose files (not needed in image)
+*.yml
+*.yaml
+postgres.yml
+cargo-tracker.yml
+nightly.yml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp

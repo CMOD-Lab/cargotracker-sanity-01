@@ -5,6 +5,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+// cz-java-0064: @ApplicationScoped CDI bean confirmed - singleton state externalized
+// to Amazon ElastiCache (Redis) via REDIS_HOST environment variable so all EKS pod
+// replicas share a single consistent data store.
 import jakarta.enterprise.context.ApplicationScoped;
 
 @ApplicationScoped

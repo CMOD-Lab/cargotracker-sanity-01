@@ -1,20 +1,54 @@
 package org.eclipse.cargotracker.interfaces.booking.sse;
 
-import java.util.EnumMap;
-import java.util.Map;
 import org.eclipse.cargotracker.domain.model.cargo.Cargo;
 import org.eclipse.cargotracker.domain.model.cargo.RoutingStatus;
 import org.eclipse.cargotracker.domain.model.cargo.TransportStatus;
+import org.eclipse.cargotracker.infrastructure.cache.RedisConfig;
+import redis.clients.jedis.Jedis;
 
-/** View adapter for displaying a cargo in a realtime tracking context. */
+/**
+ * View adapter for displaying a cargo in a realtime tracking context.
+ *
+ * <p>Remediation cz-java-0070: The previous in-process static {@code EnumMap} caches for
+ * {@code routingStatusLabels} (line 12) and {@code transportStatusLabels} (line 14) have been
+ * replaced with Amazon ElastiCache (Redis) so that label data is shared consistently across all
+ * horizontally-scaled container replicas. Connection details are supplied via the
+ * {@code REDIS_HOST}, {@code REDIS_PORT}, and {@code REDIS_PASSWORD} environment variables
+ * (injected through Kubernetes ConfigMaps / Secrets with IRSA-secured access).
+ */
 public class RealtimeCargoTrackingViewAdapter {
 
-  private static final Map<RoutingStatus, String> routingStatusLabels =
-      new EnumMap<>(RoutingStatus.class);
-  private static final Map<TransportStatus, String> transportStatusLabels =
-      new EnumMap<>(TransportStatus.class);
+  /** Redis hash key for routing-status label mappings (replaces static EnumMap, line 12). */
+  private static final String ROUTING_STATUS_CACHE_KEY   = "labels:routingStatus";
+
+  /** Redis hash key for transport-status label mappings (replaces static EnumMap, line 14). */
+  private static final String TRANSPORT_STATUS_CACHE_KEY = "labels:transportStatus";
 
   private final Cargo cargo;
+
+  /**
+   * Initialises the status-label caches in Amazon ElastiCache (Redis) if they have not been
+   * populated yet. This replaces the former static {@code EnumMap} fields (cz-java-0070).
+   */
+  static {
+    try (Jedis jedis = RedisConfig.getPool().getResource()) {
+      // Routing status labels (replaces static EnumMap routingStatusLabels, line 12)
+      if (!jedis.exists(ROUTING_STATUS_CACHE_KEY)) {
+        jedis.hset(ROUTING_STATUS_CACHE_KEY, RoutingStatus.NOT_ROUTED.name(), "Not routed");
+        jedis.hset(ROUTING_STATUS_CACHE_KEY, RoutingStatus.ROUTED.name(),     "Routed");
+        jedis.hset(ROUTING_STATUS_CACHE_KEY, RoutingStatus.MISROUTED.name(),  "Misrouted");
+      }
+
+      // Transport status labels (replaces static EnumMap transportStatusLabels, line 14)
+      if (!jedis.exists(TRANSPORT_STATUS_CACHE_KEY)) {
+        jedis.hset(TRANSPORT_STATUS_CACHE_KEY, TransportStatus.NOT_RECEIVED.name(),    "Not received");
+        jedis.hset(TRANSPORT_STATUS_CACHE_KEY, TransportStatus.IN_PORT.name(),         "In port");
+        jedis.hset(TRANSPORT_STATUS_CACHE_KEY, TransportStatus.ONBOARD_CARRIER.name(), "Onboard carrier");
+        jedis.hset(TRANSPORT_STATUS_CACHE_KEY, TransportStatus.CLAIMED.name(),         "Claimed");
+        jedis.hset(TRANSPORT_STATUS_CACHE_KEY, TransportStatus.UNKNOWN.name(),         "Unknown");
+      }
+    }
+  }
 
   public RealtimeCargoTrackingViewAdapter(Cargo cargo) {
     this.cargo = cargo;
@@ -24,16 +58,30 @@ public class RealtimeCargoTrackingViewAdapter {
     return cargo.getTrackingId().getIdString();
   }
 
+  /**
+   * Returns the human-readable routing status label, fetched from Amazon ElastiCache (Redis).
+   *
+   * @return routing status label string
+   */
   public String getRoutingStatus() {
-    return routingStatusLabels.get(cargo.getDelivery().getRoutingStatus());
+    try (Jedis jedis = RedisConfig.getPool().getResource()) {
+      return jedis.hget(ROUTING_STATUS_CACHE_KEY, cargo.getDelivery().getRoutingStatus().name());
+    }
   }
 
   public boolean isMisdirected() {
     return cargo.getDelivery().isMisdirected();
   }
 
+  /**
+   * Returns the human-readable transport status label, fetched from Amazon ElastiCache (Redis).
+   *
+   * @return transport status label string
+   */
   public String getTransportStatus() {
-    return transportStatusLabels.get(cargo.getDelivery().getTransportStatus());
+    try (Jedis jedis = RedisConfig.getPool().getResource()) {
+      return jedis.hget(TRANSPORT_STATUS_CACHE_KEY, cargo.getDelivery().getTransportStatus().name());
+    }
   }
 
   public boolean isAtDestination() {
@@ -70,17 +118,5 @@ public class RealtimeCargoTrackingViewAdapter {
     }
 
     return cargo.getDelivery().getTransportStatus().toString();
-  }
-
-  static {
-    routingStatusLabels.put(RoutingStatus.NOT_ROUTED, "Not routed");
-    routingStatusLabels.put(RoutingStatus.ROUTED, "Routed");
-    routingStatusLabels.put(RoutingStatus.MISROUTED, "Misrouted");
-
-    transportStatusLabels.put(TransportStatus.NOT_RECEIVED, "Not received");
-    transportStatusLabels.put(TransportStatus.IN_PORT, "In port");
-    transportStatusLabels.put(TransportStatus.ONBOARD_CARRIER, "Onboard carrier");
-    transportStatusLabels.put(TransportStatus.CLAIMED, "Claimed");
-    transportStatusLabels.put(TransportStatus.UNKNOWN, "Unknown");
   }
 }

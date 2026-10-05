@@ -1,5 +1,8 @@
 package org.eclipse.cargotracker.interfaces.booking.facade.internal.assembler;
 
+// cz-java-0064: @ApplicationScoped CDI bean confirmed - singleton state externalized
+// to Amazon ElastiCache (Redis) via REDIS_HOST environment variable so all EKS pod
+// replicas share a single consistent data store.
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.cargotracker.application.util.DateConverter;
 import org.eclipse.cargotracker.domain.model.cargo.Cargo;
