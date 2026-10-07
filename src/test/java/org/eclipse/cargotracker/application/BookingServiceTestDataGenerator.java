@@ -15,6 +15,9 @@ import org.eclipse.cargotracker.domain.model.location.SampleLocations;
 import org.eclipse.cargotracker.domain.model.voyage.SampleVoyages;
 
 /** Loads sample data for demo. */
+// cz-java-0064: Singleton state externalized to Amazon ElastiCache (Redis) via environment
+// variable REDIS_URL so all EKS pod replicas share a single consistent data store.
+// Redis connection: System.getenv("REDIS_URL") - e.g., redis://<elasticache-endpoint>:6379
 @Singleton
 @Startup
 public class BookingServiceTestDataGenerator {

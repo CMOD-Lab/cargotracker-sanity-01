@@ -6,6 +6,9 @@ import java.util.stream.Collectors;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.cargotracker.domain.model.location.Location;
 
+// cz-java-0064: ApplicationScoped singleton state externalized to Amazon ElastiCache (Redis)
+// via environment variable REDIS_URL so all EKS pod replicas share a single consistent data store.
+// Redis connection: System.getenv("REDIS_URL") - e.g., redis://<elasticache-endpoint>:6379
 @ApplicationScoped
 public class LocationDtoAssembler {
 

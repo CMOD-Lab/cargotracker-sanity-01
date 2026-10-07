@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cargo-tracker
+  namespace: cargo-tracker
+  labels:
+    app: cargo-tracker
+    version: "3.1-SNAPSHOT"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cargo-tracker
+  template:
+    metadata:
+      labels:
+        app: cargo-tracker
+        version: "3.1-SNAPSHOT"
+    spec:
+      containers:
+        - name: cargo-tracker
+          image: {{IMAGE_URI}}
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Redis / Amazon ElastiCache
+            - name: REDIS_HOST
+              value: "{{REDIS_HOST}}"
+            - name: REDIS_PORT
+              value: "{{REDIS_PORT}}"
+            # Database connection
+            - name: DB_JDBC_URL
+              value: "{{DB_JDBC_URL}}"
+            - name: DB_DRIVER_CLASS
+              value: "{{DB_DRIVER_CLASS}}"
+            - name: DB_USER
+              value: "{{DB_USER}}"
+            - name: DB_PASSWORD
+              value: "{{DB_PASSWORD}}"
+            # Graph traversal service
+            - name: GRAPH_TRAVERSAL_URL
+              value: "{{GRAPH_TRAVERSAL_URL}}"
+            # JVM tuning
+            - name: JAVA_OPTS
+              value: "-Xms256m -Xmx512m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8"
+            - name: TZ
+              value: "UTC"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /cargo-tracker/rest/health
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /cargo-tracker/rest/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: cargo-tracker-data
+              mountPath: /opt/payara/cargo-tracker-data
+      volumes:
+        - name: cargo-tracker-data
+          emptyDir: {}
+      terminationGracePeriodSeconds: 60

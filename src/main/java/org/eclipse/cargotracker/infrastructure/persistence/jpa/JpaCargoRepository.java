@@ -16,6 +16,9 @@ import org.eclipse.cargotracker.domain.model.cargo.CargoRepository;
 import org.eclipse.cargotracker.domain.model.cargo.TrackingId;
 import org.eclipse.cargotracker.infrastructure.events.cdi.CargoUpdated;
 
+// cz-java-0064: ApplicationScoped singleton state externalized to Amazon ElastiCache (Redis)
+// via environment variable REDIS_URL so all EKS pod replicas share a single consistent data store.
+// Redis connection: System.getenv("REDIS_URL") - e.g., redis://<elasticache-endpoint>:6379
 @ApplicationScoped
 public class JpaCargoRepository implements CargoRepository, Serializable {
 

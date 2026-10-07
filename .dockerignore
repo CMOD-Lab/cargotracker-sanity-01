@@ -1,0 +1,59 @@
+# Java / Maven build artifacts
+target/
+*.class
+
+# Maven wrapper (never used inside Docker)
+mvnw
+mvnw.cmd
+.mvn/
+
+# Gradle wrapper (not applicable but excluded for safety)
+gradlew
+gradlew.bat
+gradle/wrapper/
+
+# Version control
+.git/
+.gitignore
+.github/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+docs/
+
+# Test artifacts
+src/test/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Docker files (avoid recursive copy)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Scripts
+scripts/
+
+# Kubernetes manifests
+kubernetes/
