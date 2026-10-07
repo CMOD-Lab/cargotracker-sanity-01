@@ -31,10 +31,22 @@
     <h2.version>2.3.232</h2.version>
     <payara.version>6.2025.3</payara.version>
     <payara.arquillian.adapter.version>3.1</payara.arquillian.adapter.version>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>    
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- AWS SDK v2 version for S3 cloud-native file storage -->
+    <aws.sdk.version>2.25.40</aws.sdk.version>
+    <!-- Jedis version for Amazon ElastiCache for Redis connectivity -->
+    <jedis.version>5.1.0</jedis.version>
   </properties>
   <dependencyManagement>
     <dependencies>
+      <!-- AWS SDK v2 Bill of Materials - manages versions for all AWS SDK modules -->
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>bom</artifactId>
+        <version>${aws.sdk.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
       <!-- Arquillian Bill Of Management used to reduce collision between testing
       dependencies. Using a dependency manager we don't need to specify the version of
       each Arquillian dependency. -->
@@ -78,7 +90,23 @@
       <artifactId>jersey-server</artifactId>
       <version>3.1.10</version>
       <scope>provided</scope>
-    </dependency>    
+    </dependency>
+    <!-- AWS SDK v2 S3 client for cloud-native object storage (replaces hard-coded file paths) -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+    </dependency>
+    <!-- AWS SDK v2 SQS client for cloud-native messaging (replaces JMS/ActiveMQ dependencies) -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>sqs</artifactId>
+    </dependency>
+    <!-- Jedis Redis client for Amazon ElastiCache for Redis (replaces static mutable state) -->
+    <dependency>
+      <groupId>redis.clients</groupId>
+      <artifactId>jedis</artifactId>
+      <version>${jedis.version}</version>
+    </dependency>
     <!-- Test dependencies -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
