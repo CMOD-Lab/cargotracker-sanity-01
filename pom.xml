@@ -28,8 +28,10 @@
     <surefire.version>3.5.2</surefire.version>
     <dependency.plugin.version>3.8.1</dependency.plugin.version>
     <cargo.plugin.version>1.10.18</cargo.plugin.version>
+    <aws.sdk.version>2.25.11</aws.sdk.version>
     <h2.version>2.3.232</h2.version>
     <payara.version>6.2025.3</payara.version>
+    <jedis.version>5.1.0</jedis.version>
     <payara.arquillian.adapter.version>3.1</payara.arquillian.adapter.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>    
   </properties>
@@ -78,7 +80,30 @@
       <artifactId>jersey-server</artifactId>
       <version>3.1.10</version>
       <scope>provided</scope>
-    </dependency>    
+    </dependency>
+    <!-- AWS SDK v2 for S3 integration (cloud file storage) -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>sqs</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>sts</artifactId>
+      <version>${aws.sdk.version}</version>
+    </dependency>
+    <!-- Jedis Redis client for Amazon ElastiCache for Redis integration -->
+    <!-- Replaces static mutable state (SampleVoyages.ALL) with distributed Redis-backed cache -->
+    <dependency>
+      <groupId>redis.clients</groupId>
+      <artifactId>jedis</artifactId>
+      <version>${jedis.version}</version>
+    </dependency>
     <!-- Test dependencies -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>

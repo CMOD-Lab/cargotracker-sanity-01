@@ -15,35 +15,40 @@ import static org.eclipse.cargotracker.domain.model.location.SampleLocations.SHA
 import static org.eclipse.cargotracker.domain.model.location.SampleLocations.STOCKHOLM;
 import static org.eclipse.cargotracker.domain.model.location.SampleLocations.TOKYO;
 
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Logger;
 import org.eclipse.cargotracker.domain.model.location.Location;
 import org.eclipse.cargotracker.domain.model.location.UnLocode;
+import org.eclipse.cargotracker.infrastructure.cache.RedisCoordinatesCache;
 
 /**
- * At the moment, coordinates are produced by a simple factory. It may be converted to a repository
- * if coordinates become a domain layer concern.
+ * Coordinates factory backed by Amazon ElastiCache for Redis.
+ *
+ * <p>Coordinate lookups are served from the Redis cache (with TTL-based expiration) to prevent
+ * unbounded in-memory growth and to ensure consistent data across multiple cloud instances.
+ * A local seed map is used to populate Redis on first access and as a fallback when Redis is
+ * temporarily unavailable.
+ *
+ * <p>Previously this class held a static {@code COORDINATES_MAP} without any TTL or expiration
+ * policy (rule cr-java-0067). That map has been replaced by {@link RedisCoordinatesCache} which
+ * enforces a configurable TTL (default 24 h) via the {@code REDIS_COORDINATES_TTL_SECONDS}
+ * environment variable.
  */
+@ApplicationScoped
 public class CoordinatesFactory {
 
-  private static final Map<String, Coordinates> COORDINATES_MAP;
+  private static final Logger logger = Logger.getLogger(CoordinatesFactory.class.getName());
 
-  private CoordinatesFactory() {
-    /* Prevent instantiation. */
-  }
-
-  public static Coordinates find(Location location) {
-    return find(location.getUnLocode());
-  }
-
-  public static Coordinates find(UnLocode unLocode) {
-    return find(unLocode.getIdString());
-  }
-
-  public static Coordinates find(String unLocode) {
-    return COORDINATES_MAP.get(unLocode);
-  }
+  /**
+   * Seed map used to populate the Redis cache on startup and as a local fallback when Redis is
+   * temporarily unavailable. This map is intentionally read-only and is NOT used as the primary
+   * cache — all lookups go through {@link RedisCoordinatesCache} first.
+   */
+  private static final Map<String, Coordinates> SEED_MAP;
 
   static {
     Map<String, Coordinates> map = new HashMap<>();
@@ -64,6 +69,60 @@ public class CoordinatesFactory {
     map.put(DALLAS.getUnLocode().getIdString(), new Coordinates(33, -97));
     map.put(UNKNOWN.getUnLocode().getIdString(), new Coordinates(-90, 0)); // The South Pole.
 
-    COORDINATES_MAP = Collections.unmodifiableMap(map);
+    SEED_MAP = Collections.unmodifiableMap(map);
+  }
+
+  @Inject
+  private RedisCoordinatesCache redisCoordinatesCache;
+
+  /**
+   * Looks up coordinates for the given {@link Location}.
+   *
+   * @param location the location whose coordinates are required
+   * @return the {@link Coordinates}, or {@code null} if not found
+   */
+  public Coordinates find(Location location) {
+    return find(location.getUnLocode());
+  }
+
+  /**
+   * Looks up coordinates for the given {@link UnLocode}.
+   *
+   * @param unLocode the UN/LOCODE whose coordinates are required
+   * @return the {@link Coordinates}, or {@code null} if not found
+   */
+  public Coordinates find(UnLocode unLocode) {
+    return find(unLocode.getIdString());
+  }
+
+  /**
+   * Looks up coordinates for the given UN/LOCODE string.
+   *
+   * <p>Lookup order:
+   * <ol>
+   *   <li>Amazon ElastiCache for Redis (with TTL-based expiration)</li>
+   *   <li>Local seed map (fallback when Redis is unavailable)</li>
+   * </ol>
+   * When a cache miss occurs in Redis but the entry exists in the seed map, the entry is
+   * written back to Redis so that subsequent lookups are served from the distributed cache.
+   *
+   * @param unLocode the UN/LOCODE string
+   * @return the {@link Coordinates}, or {@code null} if not found
+   */
+  public Coordinates find(String unLocode) {
+    // 1. Try Redis cache first (TTL-controlled, distributed)
+    Coordinates cached = redisCoordinatesCache.get(unLocode);
+    if (cached != null) {
+      return cached;
+    }
+
+    // 2. Fall back to seed map
+    Coordinates seedCoordinates = SEED_MAP.get(unLocode);
+    if (seedCoordinates != null && redisCoordinatesCache.isAvailable()) {
+      // Write-through: populate Redis so future lookups are served from the distributed cache
+      redisCoordinatesCache.put(unLocode, seedCoordinates);
+      logger.fine("Write-through: seeded Redis coordinates cache for UN/LOCODE: " + unLocode);
+    }
+    return seedCoordinates;
   }
 }

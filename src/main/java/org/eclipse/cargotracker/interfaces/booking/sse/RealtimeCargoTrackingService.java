@@ -18,7 +18,9 @@ import jakarta.ws.rs.sse.SseBroadcaster;
 import jakarta.ws.rs.sse.SseEventSink;
 import org.eclipse.cargotracker.domain.model.cargo.Cargo;
 import org.eclipse.cargotracker.domain.model.cargo.CargoRepository;
+import org.eclipse.cargotracker.infrastructure.cache.RedisLabelCache;
 import org.eclipse.cargotracker.infrastructure.events.cdi.CargoUpdated;
+import org.eclipse.cargotracker.interfaces.CoordinatesFactory;
 
 /** Sever-sent events service for tracking all cargo in real time. */
 @Singleton
@@ -27,6 +29,12 @@ public class RealtimeCargoTrackingService {
   @Inject private Logger logger;
 
   @Inject private CargoRepository cargoRepository;
+
+  /** Amazon ElastiCache for Redis-backed label cache injected into each view adapter. */
+  @Inject private RedisLabelCache redisLabelCache;
+
+  /** Amazon ElastiCache for Redis-backed coordinates factory injected into each view adapter. */
+  @Inject private CoordinatesFactory coordinatesFactory;
 
   @Context private Sse sse;
   private SseBroadcaster broadcaster;
@@ -60,7 +68,7 @@ public class RealtimeCargoTrackingService {
   private OutboundSseEvent cargoToSseEvent(Cargo cargo) {
     return sse.newEventBuilder()
         .mediaType(MediaType.APPLICATION_JSON_TYPE)
-        .data(new RealtimeCargoTrackingViewAdapter(cargo))
+        .data(new RealtimeCargoTrackingViewAdapter(cargo, redisLabelCache, coordinatesFactory))
         .build();
   }
 }

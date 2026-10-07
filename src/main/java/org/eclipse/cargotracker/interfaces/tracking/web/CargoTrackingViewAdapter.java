@@ -17,9 +17,19 @@ public class CargoTrackingViewAdapter {
 
   private final Cargo cargo;
   private final List<HandlingEventViewAdapter> events;
+  private final CoordinatesFactory coordinatesFactory;
 
-  public CargoTrackingViewAdapter(Cargo cargo, List<HandlingEvent> handlingEvents) {
+  /**
+   * Constructs a new adapter backed by the provided {@link CoordinatesFactory}.
+   *
+   * @param cargo              the cargo domain object to adapt
+   * @param handlingEvents     the list of handling events for this cargo
+   * @param coordinatesFactory the Redis-backed coordinates factory (Amazon ElastiCache for Redis)
+   */
+  public CargoTrackingViewAdapter(
+      Cargo cargo, List<HandlingEvent> handlingEvents, CoordinatesFactory coordinatesFactory) {
     this.cargo = cargo;
+    this.coordinatesFactory = coordinatesFactory;
     this.events = new ArrayList<>(handlingEvents.size());
 
     handlingEvents.stream().map(HandlingEventViewAdapter::new).forEach(events::add);
@@ -38,7 +48,7 @@ public class CargoTrackingViewAdapter {
   }
 
   public Coordinates getOriginCoordinates() {
-    return CoordinatesFactory.find(cargo.getRouteSpecification().getOrigin());
+    return coordinatesFactory.find(cargo.getRouteSpecification().getOrigin());
   }
 
   public String getDestinationName() {
@@ -50,7 +60,7 @@ public class CargoTrackingViewAdapter {
   }
 
   public Coordinates getDestinationCoordinates() {
-    return CoordinatesFactory.find(cargo.getRouteSpecification().getDestination());
+    return coordinatesFactory.find(cargo.getRouteSpecification().getDestination());
   }
 
   public String getLastKnownLocationName() {
@@ -64,7 +74,7 @@ public class CargoTrackingViewAdapter {
   }
 
   public Coordinates getLastKnownLocationCoordinates() {
-    return CoordinatesFactory.find(cargo.getDelivery().getLastKnownLocation());
+    return coordinatesFactory.find(cargo.getDelivery().getLastKnownLocation());
   }
 
   public String getStatusCode() {

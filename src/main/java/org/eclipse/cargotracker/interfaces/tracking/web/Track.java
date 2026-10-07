@@ -17,6 +17,7 @@ import org.eclipse.cargotracker.domain.model.cargo.CargoRepository;
 import org.eclipse.cargotracker.domain.model.cargo.TrackingId;
 import org.eclipse.cargotracker.domain.model.handling.HandlingEvent;
 import org.eclipse.cargotracker.domain.model.handling.HandlingEventRepository;
+import org.eclipse.cargotracker.interfaces.CoordinatesFactory;
 
 /**
  * Backing bean for tracking cargo. This interface sits immediately on top of the domain layer,
@@ -39,6 +40,9 @@ public class Track implements Serializable {
 
   @Inject private CargoRepository cargoRepository;
   @Inject private HandlingEventRepository handlingEventRepository;
+
+  /** Amazon ElastiCache for Redis-backed coordinates factory. */
+  @Inject private CoordinatesFactory coordinatesFactory;
 
   private String trackingId;
   private CargoTrackingViewAdapter cargo;
@@ -76,7 +80,7 @@ public class Track implements Serializable {
           handlingEventRepository
               .lookupHandlingHistoryOfCargo(new TrackingId(trackingId))
               .getDistinctEventsByCompletionTime();
-      this.cargo = new CargoTrackingViewAdapter(cargo, handlingEvents);
+      this.cargo = new CargoTrackingViewAdapter(cargo, handlingEvents, coordinatesFactory);
     } else {
       this.cargo = null;
     }

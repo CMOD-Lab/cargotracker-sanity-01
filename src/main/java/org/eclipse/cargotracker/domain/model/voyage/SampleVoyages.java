@@ -4,14 +4,29 @@ import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.annotation.PostConstruct;
 import org.eclipse.cargotracker.domain.model.location.Location;
 import org.eclipse.cargotracker.domain.model.location.SampleLocations;
+import org.eclipse.cargotracker.infrastructure.cache.RedisVoyageCache;
 
-/** Sample carrier movements, for demo/test purposes. */
+/**
+ * Sample carrier movements, for demo/test purposes.
+ *
+ * <p>Previously used a static mutable {@code HashMap} (ALL) to store voyage data, which caused
+ * data inconsistency across distributed cloud instances. This has been refactored to use Amazon
+ * ElastiCache for Redis via {@link RedisVoyageCache}, enabling synchronized access across all
+ * application instances in a multi-instance AWS deployment.
+ */
+@ApplicationScoped
 public class SampleVoyages {
+
+  private static final Logger logger = Logger.getLogger(SampleVoyages.class.getName());
 
   public static final Voyage CM001 =
       createVoyage("CM001", SampleLocations.STOCKHOLM, SampleLocations.HAMBURG);
@@ -268,19 +283,64 @@ public class SampleVoyages {
                   .plusMinutes(37))
           .build();
 
-  public static final Map<VoyageNumber, Voyage> ALL = new HashMap<>();
+  /**
+   * Amazon ElastiCache for Redis-backed voyage cache.
+   *
+   * <p>Replaces the former static mutable {@code HashMap} (ALL) to eliminate state inconsistency
+   * across distributed cloud instances. All voyage registrations and lookups are delegated to
+   * {@link RedisVoyageCache}, which synchronizes state via Amazon ElastiCache for Redis.
+   */
+  @Inject
+  private RedisVoyageCache voyageCache;
 
-  static {
+  /**
+   * Initializes the Redis-backed voyage cache by registering all sample voyages.
+   *
+   * <p>This method is invoked once after CDI injection, replacing the former static initializer
+   * block that populated the mutable static {@code ALL} HashMap.
+   */
+  @PostConstruct
+  public void initializeVoyageCache() {
     for (Field field : SampleVoyages.class.getDeclaredFields()) {
       if (field.getType().equals(Voyage.class)) {
         try {
           Voyage voyage = (Voyage) field.get(null);
-          ALL.put(voyage.getVoyageNumber(), voyage);
+          voyageCache.put(voyage);
         } catch (IllegalAccessException e) {
-          throw new RuntimeException(e);
+          logger.log(Level.SEVERE, "Failed to register voyage in Redis cache: " + e.getMessage(), e);
+          throw new RuntimeException("Failed to initialize voyage cache", e);
         }
       }
     }
+    logger.info("SampleVoyages: registered " + voyageCache.size() + " voyages in ElastiCache for Redis.");
+  }
+
+  /**
+   * Returns all voyages from the Redis-backed cache.
+   *
+   * @return list of all voyages
+   */
+  public List<Voyage> getAll() {
+    return voyageCache.getAll();
+  }
+
+  /**
+   * Looks up a voyage by its voyage number from the Redis-backed cache.
+   *
+   * @param voyageNumber the voyage number to look up
+   * @return the voyage, or {@code null} if not found
+   */
+  public Voyage lookup(VoyageNumber voyageNumber) {
+    return voyageCache.get(voyageNumber);
+  }
+
+  /**
+   * Returns an unmodifiable view of all voyages keyed by voyage number.
+   *
+   * @return unmodifiable map of all voyages
+   */
+  public Map<VoyageNumber, Voyage> getAllAsMap() {
+    return voyageCache.getAllAsMap();
   }
 
   private static Voyage createVoyage(String id, Location from, Location to) {
@@ -289,13 +349,5 @@ public class SampleVoyages {
         new Schedule(
             Collections.singletonList(
                 new CarrierMovement(from, to, LocalDateTime.now(), LocalDateTime.now()))));
-  }
-
-  public static List<Voyage> getAll() {
-    return new ArrayList<>(ALL.values());
-  }
-
-  public static Voyage lookup(VoyageNumber voyageNumber) {
-    return ALL.get(voyageNumber);
   }
 }

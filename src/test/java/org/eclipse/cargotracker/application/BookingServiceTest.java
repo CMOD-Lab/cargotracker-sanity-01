@@ -66,20 +66,33 @@ import org.jboss.shrinkwrap.resolver.api.maven.Maven;
 import org.junit.jupiter.api.MethodOrderer.OrderAnnotation;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * Application layer integration test covering a number of otherwise fairly trivial components that
  * largely do not warrant their own tests.
+ *
+ * <p>Previously used static mutable fields ({@code trackingId}, {@code candidates},
+ * {@code deadline}, {@code assigned}) to share state across ordered test methods. In a
+ * multi-instance cloud deployment, static variables cause data inconsistency across instances.
+ * These fields have been replaced with instance variables, and {@link TestInstance.Lifecycle#PER_CLASS}
+ * is used to maintain a single test instance across all ordered test methods, eliminating the
+ * need for static mutable state.
  */
 @ExtendWith(ArquillianExtension.class)
 @TestMethodOrder(OrderAnnotation.class)
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BookingServiceTest {
-  private static TrackingId trackingId;
-  private static List<Itinerary> candidates;
-  private static LocalDate deadline;
-  private static Itinerary assigned;
+
+  // Replaced static mutable fields with instance variables.
+  // @TestInstance(PER_CLASS) ensures a single instance is reused across all ordered test methods,
+  // eliminating static mutable state that causes inconsistency in multi-instance cloud deployments.
+  private TrackingId trackingId;
+  private List<Itinerary> candidates;
+  private LocalDate deadline;
+  private Itinerary assigned;
 
   @Inject private BookingService bookingService;
   @PersistenceContext private EntityManager entityManager;

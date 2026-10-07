@@ -8,9 +8,17 @@ import org.eclipse.cargotracker.interfaces.CoordinatesFactory;
 public class LocationViewAdapter {
 
   private final Location location;
+  private final CoordinatesFactory coordinatesFactory;
 
-  public LocationViewAdapter(Location location) {
+  /**
+   * Constructs a new adapter backed by the provided {@link CoordinatesFactory}.
+   *
+   * @param location           the location domain object to adapt
+   * @param coordinatesFactory the Redis-backed coordinates factory (Amazon ElastiCache for Redis)
+   */
+  public LocationViewAdapter(Location location, CoordinatesFactory coordinatesFactory) {
     this.location = location;
+    this.coordinatesFactory = coordinatesFactory;
   }
 
   public String getUnLocode() {
@@ -22,6 +30,6 @@ public class LocationViewAdapter {
   }
 
   public Coordinates getCoordinates() {
-    return CoordinatesFactory.find(location);
+    return coordinatesFactory.find(location);
   }
 }
